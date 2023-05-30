@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
 import rospy
-from math import atan2, atan, tan, sqrt
+from math import atan2, atan, tan
 from turtlesim.msg import Pose
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
+from turtle_regulation.srv import waypoint, waypointResponse
 
 class SetWaypointNode:
     def __init__(self):
@@ -32,6 +33,9 @@ class SetWaypointNode:
         # Setting the distance tolerance
         self.distance_tolerance = rospy.get_param('~distance_tolerance', 0.1)
 
+        # Creating the service to set the waypoint
+        rospy.Service('set_waypoint_service', waypoint, self.handle_set_waypoint)
+
     def pose_callback(self, data):
         # Updating the pose variable
         self.pose = data
@@ -45,7 +49,7 @@ class SetWaypointNode:
         angle_error = atan(tan(desired_angle - self.pose.theta))
 
         # Calculating the linear distance to the waypoint
-        distance = sqrt((y_diff)**2 + (x_diff)**2)
+        distance = ((y_diff)**2 + (x_diff)**2) ** 0.5
 
         # Calculating the linear error
         linear_error = distance
@@ -68,6 +72,15 @@ class SetWaypointNode:
         else:
             # Publishing False on the is_moving topic
             self.is_moving_pub.publish(False)
+
+    def handle_set_waypoint(self, request):
+        # Updating the waypoint based on the service request
+        self.waypoint = (request.x, request.y)
+
+        # Returning the response
+        response = waypointResponse()
+        response.res = True  # Or any other appropriate response
+        return response
 
 if __name__ == '__main__':
     try:
