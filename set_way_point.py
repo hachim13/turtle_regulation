@@ -1,77 +1,54 @@
 #!/usr/bin/env python
 
 import rospy
+from math import atan2, atan, tan
 from turtlesim.msg import Pose
 from geometry_msgs.msg import Twist
-from math import atan2, atan, tan
 
-# Variables globales
-turtle_pose = Pose()
-waypoint = (7, 7)
+class SetWaypointNode:
+    def __init__(self):
+        rospy.init_node('set_way_point')
 
+        # Subscribing to the "pose" topic
+        rospy.Subscriber('pose', Pose, self.pose_callback)
 
-def pose_callback(data):
-    # Mettre à jour la pose de la tortue
-    global turtle_pose
-    turtle_pose = data
+        # Defining the waypoint
+        self.waypoint = (7, 7)
 
+        # Getting the Kp value from the ROS parameter server
+        self.Kp = rospy.get_param('~Kp', 1.0)
 
-def calculate_desired_angle():
-    # Calculer l'angle désiré en utilisant la formule atan2
-    x_diff = waypoint[0] - turtle_pose.x
-    y_diff = waypoint[1] - turtle_pose.y
-    desired_angle = atan2(y_diff, x_diff)
-    return desired_angle
+        # Publishing the cmd_vel topic
+        self.cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
 
+        # Initializing the pose variable
+        self.pose = Pose()
 
-def calculate_command_angle(desired_angle):
-    # Calculer l'angle de commande en utilisant la formule atan(tan(desired_angle - turtle_pose.theta))
-    command_angle = atan(tan(desired_angle - turtle_pose.theta))
-    return command_angle
+    def pose_callback(self, data):
+        # Updating the pose variable
+        self.pose = data
 
+        # Calculating the desired angle
+        x_diff = self.waypoint[0] - self.pose.x
+        y_diff = self.waypoint[1] - self.pose.y
+        desired_angle = atan2(y_diff, x_diff)
 
-def regulate_in_heading(desired_angle, kp):
-    # Régulation en cap - Calculer la commande angulaire
-    command_angle = calculate_command_angle(desired_angle)
-    cmd_vel = Twist()
-    cmd_vel.angular.z = kp * command_angle
+        # Calculating the error
+        error = atan(tan(desired_angle - self.pose.theta))
 
-    # Publier sur le topic cmd_vel
-    pub = rospy.Publisher('/turtle1/cmd_vel', Twist, queue_size=10)
-    pub.publish(cmd_vel)
+        # Calculating the control input
+        angular_velocity = self.Kp * error
 
+        # Creating the Twist message
+        cmd_msg = Twist()
+        cmd_msg.angular.z = angular_velocity
 
-def set_way_point():
-    # Définir le waypoint
-    global waypoint
-    waypoint = (7, 7)
-
-
-def main():
-    rospy.init_node('set_way_point_node', anonymous=True)
-
-    # S'abonner au topic "pose"
-    rospy.Subscriber('/turtle1/pose', Pose, pose_callback)
-
-    # Définir le waypoint
-    set_way_point()
-
-    # Constante de proportionnalité pour la régulation en cap
-    kp = rospy.get_param('~kp', 1.0)
-
-    rate = rospy.Rate(10)  # 10 Hz
-
-    while not rospy.is_shutdown():
-        desired_angle = calculate_desired_angle()
-
-        # Régulation en cap
-        regulate_in_heading(desired_angle, kp)
-
-        rate.sleep()
-
+        # Publishing the Twist message
+        self.cmd_pub.publish(cmd_msg)
 
 if __name__ == '__main__':
     try:
-        main()
+        node = SetWaypointNode()
+        rospy.spin()
     except rospy.ROSInterruptException:
         pass
