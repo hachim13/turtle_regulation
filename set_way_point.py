@@ -1,90 +1,81 @@
 #!/usr/bin/env python
 
 import rospy
-from math import atan2, atan, tan
 from turtlesim.msg import Pose
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Bool
-from turtle_regulation.srv import waypoint, waypointResponse
+from std_msgs.msg import Bool, Float32
+from turtle_regulation.srv import way_point
 
 class SetWaypointNode:
     def __init__(self):
-        rospy.init_node('set_way_point')
+        rospy.init_node('set_waypoint_node')
 
-        # Subscribing to the "pose" topic
+        self.pose = Pose()
+        self.waypoint = (7.0, 7.0)
+
+        self.distance_tolerance = rospy.get_param('~distance_tolerance', 0.1)
+        self.is_moving = False
+
+        self.cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
+        self.is_moving_pub = rospy.Publisher('is_moving', Bool, queue_size=1)
         rospy.Subscriber('pose', Pose, self.pose_callback)
 
-        # Defining the waypoint
-        self.waypoint = (7, 7)
+        self.set_waypoint_service = rospy.Service('set_waypoint_service', way_point, self.set_waypoint_handler)
 
-        # Getting the Kp value from the ROS parameter server
-        self.Kp = rospy.get_param('~Kp', 1.0)
-        self.Kpl = rospy.get_param('~Kpl', 1.0)
+        self.kp = rospy.get_param('~kp', 0.5)
+        self.kpl = rospy.get_param('~kpl', 0.2)
 
-        # Publishing the cmd_vel topic
-        self.cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
-
-        # Publishing the is_moving topic
-        self.is_moving_pub = rospy.Publisher('is_moving', Bool, queue_size=10)
-
-        # Initializing the pose variable
-        self.pose = Pose()
-
-        # Setting the distance tolerance
-        self.distance_tolerance = rospy.get_param('~distance_tolerance', 0.1)
-
-        # Creating the service to set the waypoint
-        rospy.Service('set_waypoint_service', waypoint, self.handle_set_waypoint)
+        self.run()
 
     def pose_callback(self, data):
-        # Updating the pose variable
         self.pose = data
 
-        # Calculating the desired angle
-        x_diff = self.waypoint[0] - self.pose.x
-        y_diff = self.waypoint[1] - self.pose.y
-        desired_angle = atan2(y_diff, x_diff)
+    def calculate_desired_angle(self):
+        dx = self.waypoint[0] - self.pose.x
+        dy = self.waypoint[1] - self.pose.y
+        return math.atan2(dy, dx)
 
-        # Calculating the angle error
-        angle_error = atan(tan(desired_angle - self.pose.theta))
+    def calculate_linear_error(self):
+        distance = math.sqrt((self.waypoint[0] - self.pose.x) ** 2 + (self.waypoint[1] - self.pose.y) ** 2)
+        return distance
 
-        # Calculating the linear distance to the waypoint
-        distance = ((y_diff)**2 + (x_diff)**2) ** 0.5
+    def publish_twist(self, angular_vel):
+        twist = Twist()
+        twist.linear.x = self.kpl * self.calculate_linear_error()
+        twist.angular.z = self.kp * angular_vel
+        self.cmd_pub.publish(twist)
 
-        # Calculating the linear error
-        linear_error = distance
+    def set_waypoint_handler(self, req):
+        self.waypoint = (req.x.data, req.y.data)
+        return True
 
-        if linear_error > self.distance_tolerance:
-            # Calculating the control inputs
-            angular_velocity = self.Kp * angle_error
-            linear_velocity = self.Kpl * linear_error
+    def run(self):
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            desired_angle = self.calculate_desired_angle()
+            angular_error = desired_angle - self.pose.theta
 
-            # Creating the Twist message
-            cmd_msg = Twist()
-            cmd_msg.angular.z = angular_velocity
-            cmd_msg.linear.x = linear_velocity
+            if angular_error > math.pi:
+                angular_error -= 2 * math.pi
+            elif angular_error < -math.pi:
+                angular_error += 2 * math.pi
 
-            # Publishing the Twist message
-            self.cmd_pub.publish(cmd_msg)
+            if abs(angular_error) > 0.1:
+                self.is_moving = True
+                self.publish_twist(angular_error)
+            else:
+                linear_error = self.calculate_linear_error()
+                if linear_error > self.distance_tolerance:
+                    self.is_moving = True
+                    self.publish_twist(0)
+                else:
+                    self.is_moving = False
+                    self.publish_twist(0)
 
-            # Publishing True on the is_moving topic
-            self.is_moving_pub.publish(True)
-        else:
-            # Publishing False on the is_moving topic
-            self.is_moving_pub.publish(False)
+            self.is_moving_pub.publish(Bool(self.is_moving))
 
-    def handle_set_waypoint(self, request):
-        # Updating the waypoint based on the service request
-        self.waypoint = (request.x, request.y)
+            rate.sleep()
 
-        # Returning the response
-        response = waypointResponse()
-        response.res = True  # Or any other appropriate response
-        return response
 
 if __name__ == '__main__':
-    try:
-        node = SetWaypointNode()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        pass
+    SetWaypointNode()
