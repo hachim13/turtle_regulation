@@ -79,3 +79,4 @@ class SetWaypointNode:
 
 if __name__ == '__main__':
     SetWaypointNode()
+
